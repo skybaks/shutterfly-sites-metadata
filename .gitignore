@@ -1,6 +1,8 @@
 #python
 __cache__/
 *.pyc
+/env/
+/venv/
 
 #temp
 /temp

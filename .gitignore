@@ -9,3 +9,6 @@ __cache__/
 /tmp
 *.temp
 *.tmp
+
+#vscode
+/.vscode/

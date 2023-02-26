@@ -1,0 +1,9 @@
+#python
+__cache__/
+*.pyc
+
+#temp
+/temp
+/tmp
+*.temp
+*.tmp

@@ -1,8 +1,10 @@
 from argparse import ArgumentParser
-import json
 import json5
+import csv
 from requests import Session
 from loguru import logger
+from bs4 import BeautifulSoup
+import time
 
 
 class ShutterflySitesItem:
@@ -12,6 +14,7 @@ class ShutterflySitesItem:
     title: str = ''
     created: int = 0
     modified: int = 0
+    parent = None
 
     def __init__(self, item_dict: 'dict[str, any]') -> None:
         if item_dict.get('nodeType', '') == 'shutterflyItem':
@@ -32,7 +35,6 @@ class ShutterflySitesAlbum:
     created: int = 0
     modified: int = 0
     count: int = 0
-    items: 'list[ShutterflySitesItem]' = []
     node_id: int = 0
 
     def __init__(self, album_dict: 'dict[str, any]') -> None:
@@ -46,6 +48,11 @@ class ShutterflySitesAlbum:
             logger.debug('Created album object with title: %s' % (self.title,))
         else:
             logger.error('Error creating album: input object is not of nodeType "albumGroup"')
+
+    @property
+    def description(self) -> str:
+        soup = BeautifulSoup(self.description_html, features="html.parser")
+        return soup.get_text('\n')
 
 
 def shutterfly_get_items(site_name: str, node_id: int, layout: str, session: Session=None) -> 'tuple[str, Session]':
@@ -82,27 +89,22 @@ if __name__ == '__main__':
     parser.add_argument('site_name', help='Name of the shutterfly site to collect metadata from')
     args = parser.parse_args()
 
+    start_time = time.time()
+
     albums_js, session = shutterfly_get_items(args.site_name, 5, 'ManagementAlbums')
     logger.info('Converting js data to dict')
     albums_data: dict = json5.loads(albums_js)
-
-    logger.info('Saving json data to albums.json')
-    with open('temp/albums.json', 'w', encoding='utf-8') as json_file:
-        json_file.write(json.dumps(albums_data))
 
     albums: 'list[dict]' = albums_data['result']['section']['groups']
     logger.debug('albums len: %i' % (len(albums),))
 
     shutter_albums: 'list[ShutterflySitesAlbum]' = []
+    shutter_items: 'list[ShutterflySitesItem]' = []
     for album in albums:
         shutter_album = ShutterflySitesAlbum(album)
         album_js, session = shutterfly_get_items(args.site_name, shutter_album.node_id, 'ManagementAlbumPictures', session)
         logger.info('Converting js data to dict')
         album_data: dict = json5.loads(album_js)
-
-        logger.info('Saving json data to album.json')
-        with open('temp/album.json', 'w', encoding='utf-8') as json_file:
-            json_file.write(json.dumps(album_data))
 
         items: 'list[dict]' = album_data['result']['section']['items']
         logger.debug('items len: %i' % (len(items),))
@@ -115,8 +117,42 @@ if __name__ == '__main__':
 
         for item in items:
             shutter_album_item = ShutterflySitesItem(item)
-            shutter_album.items.append(shutter_album_item)
+            shutter_album_item.parent = shutter_album
+            shutter_items.append(shutter_album_item)
 
         shutter_albums.append(shutter_album)
 
-    pass
+    logger.info('Writing photos.csv with %i items' % (len(shutter_items),))
+    with open('photos.csv', 'w', encoding='utf-8', newline='') as photos_csv_file:
+        fieldnames = ['title', 'description', 'created', 'modified', 'node_id', 'album_title', 'album_node_id']
+        dw = csv.DictWriter(photos_csv_file, fieldnames=fieldnames)
+        dw.writeheader()
+
+        for shutter_item in shutter_items:
+            dw.writerow({
+                'title': shutter_item.title,
+                'description': shutter_item.description,
+                'created': shutter_item.created,
+                'modified': shutter_item.modified,
+                'node_id': shutter_item.node_id,
+                'album_title': shutter_item.parent.title,
+                'album_node_id': shutter_item.parent.node_id,
+            })
+
+    logger.info('Writing albums.csv with %i albums' % (len(shutter_albums),))
+    with open('albums.csv', 'w', encoding='utf-8', newline='') as albums_csv_file:
+        fieldnames = ['title', 'description', 'created', 'modified', 'count', 'node_id']
+        dw = csv.DictWriter(albums_csv_file, fieldnames=fieldnames)
+        dw.writeheader()
+
+        for shutter_album in shutter_albums:
+            dw.writerow({
+                'title': shutter_album.title,
+                'description': shutter_album.description,
+                'created': shutter_album.created,
+                'modified': shutter_album.modified,
+                'count': shutter_album.count,
+                'node_id': shutter_album.node_id,
+            })
+
+    logger.info('Done in {:4.1f} seconds'.format(time.time() - start_time))

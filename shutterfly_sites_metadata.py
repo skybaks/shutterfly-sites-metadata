@@ -14,16 +14,20 @@ class ShutterflySitesItem:
     title: str = ''
     created: int = 0
     modified: int = 0
+    comments_count: int = 0
+    comments: 'list[str]' = list()
     parent = None
 
     def __init__(self, item_dict: 'dict[str, any]') -> None:
         if item_dict.get('nodeType', '') == 'shutterflyItem':
-            self.capture_date = item_dict.get('capture_date', 0)
+            self.capture_date = item_dict.get('captureDate', 0)
             self.node_id = item_dict.get('nodeId', 0)
             self.description = item_dict.get('text', '')
             self.title = item_dict.get('title', '')
             self.created = item_dict.get('created', 0)
             self.modified = item_dict.get('modified', 0)
+            self.comments_count = item_dict.get('comments', 0)
+            self.comments = list()
             logger.debug('Created item object with title: %s' % (self.title,))
         else:
             logger.error('Error creating item: input object is not of nodeType "shutterflyItem"')
@@ -116,6 +120,17 @@ def get_albums_and_items(albums_id: int, path: str, session: Session=None) -> 't
         for item in items:
             shutter_album_item = ShutterflySitesItem(item)
             shutter_album_item.parent = shutter_album
+
+            if shutter_album_item.comments_count > 0:
+                logger.debug("Getting comments for node %i" % (shutter_album_item.node_id,))
+                item_js, session = shutterfly_get_items(args.site_name, shutter_album_item.node_id, "Medium", session=session, path=path)
+                logger.info("Converting js data to dict")
+                item_data: dict = json5.loads(item_js)
+                item_node = item_data["result"]["section"]
+                if item_node["nodeType"] == "shutterflyItem":
+                    for comment in item_node["commentList"]:
+                        shutter_album_item.comments.append(comment["text"])
+
             shutter_items.append(shutter_album_item)
 
         shutter_albums.append(shutter_album)
@@ -137,7 +152,7 @@ if __name__ == '__main__':
 
     logger.info('Writing photos.csv with %i items' % (len(shutter_items),))
     with open('photos.csv', 'w', encoding='utf-8', newline='') as photos_csv_file:
-        fieldnames = ['title', 'description', 'created', 'modified', 'node_id', 'album_title', 'album_node_id']
+        fieldnames = ['title', 'description', 'comments', 'created', 'modified', 'node_id', 'album_title', 'album_node_id']
         dw = csv.DictWriter(photos_csv_file, fieldnames=fieldnames)
         dw.writeheader()
 
@@ -145,6 +160,7 @@ if __name__ == '__main__':
             dw.writerow({
                 'title': shutter_item.title,
                 'description': shutter_item.description,
+                'comments': "\n".join(shutter_item.comments),
                 'created': shutter_item.created,
                 'modified': shutter_item.modified,
                 'node_id': shutter_item.node_id,

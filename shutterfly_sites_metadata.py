@@ -55,13 +55,13 @@ class ShutterflySitesAlbum:
         return soup.get_text('\n')
 
 
-def shutterfly_get_items(site_name: str, node_id: int, layout: str, session: Session=None) -> 'tuple[str, Session]':
+def shutterfly_get_items(site_name: str, node_id: int, layout: str, session: Session=None, path="/pictures") -> 'tuple[str, Session]':
     logger.debug('Getting items for site %s with nodeId %i' % (site_name, node_id))
     payload: 'dict[str, str]' = {
         'startIndex': 0,
         'size': -1,
         'pageSize': -1,
-        'page': '%s/pictures' % (site_name,),
+        'page': '%s%s' % (site_name, path),
         'nodeId': node_id,
         'layout': layout,
         'format': 'js',
@@ -84,16 +84,14 @@ def shutterfly_get_items(site_name: str, node_id: int, layout: str, session: Ses
     return response.text, s
 
 
-if __name__ == '__main__':
-    parser = ArgumentParser()
-    parser.add_argument('site_name', help='Name of the shutterfly site to collect metadata from')
-    args = parser.parse_args()
-
-    start_time = time.time()
-
-    albums_js, session = shutterfly_get_items(args.site_name, 5, 'ManagementAlbums')
+def get_albums_and_items(albums_id: int, path: str, session: Session=None) -> 'tuple[list[ShutterflySitesAlbum], list[ShutterflySitesItem], Session]':
+    albums_js, session = shutterfly_get_items(args.site_name, albums_id, 'ManagementAlbums', session=session, path=path)
     logger.info('Converting js data to dict')
     albums_data: dict = json5.loads(albums_js)
+
+    if "result" not in albums_data:
+        logger.error("Album lookup failed for nodeId %i" % (albums_id,))
+        return list(), list(), session
 
     albums: 'list[dict]' = albums_data['result']['section']['groups']
     logger.debug('albums len: %i' % (len(albums),))
@@ -102,7 +100,7 @@ if __name__ == '__main__':
     shutter_items: 'list[ShutterflySitesItem]' = []
     for album in albums:
         shutter_album = ShutterflySitesAlbum(album)
-        album_js, session = shutterfly_get_items(args.site_name, shutter_album.node_id, 'ManagementAlbumPictures', session)
+        album_js, session = shutterfly_get_items(args.site_name, shutter_album.node_id, 'ManagementAlbumPictures', session=session, path=path)
         logger.info('Converting js data to dict')
         album_data: dict = json5.loads(album_js)
 
@@ -121,6 +119,21 @@ if __name__ == '__main__':
             shutter_items.append(shutter_album_item)
 
         shutter_albums.append(shutter_album)
+
+    return shutter_albums, shutter_items, session
+
+
+if __name__ == '__main__':
+    parser = ArgumentParser()
+    parser.add_argument('site_name', help='Name of the shutterfly site to collect metadata from')
+    args = parser.parse_args()
+
+    start_time = time.time()
+
+    albums5, items5, session = get_albums_and_items(5, "/pictures")
+    albums24, items24, session = get_albums_and_items(24, "", session=session)
+    shutter_albums = albums5 + albums24
+    shutter_items = items5 + items24
 
     logger.info('Writing photos.csv with %i items' % (len(shutter_items),))
     with open('photos.csv', 'w', encoding='utf-8', newline='') as photos_csv_file:
